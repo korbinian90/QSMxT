@@ -14,6 +14,9 @@ from scripts.get_qsmxt_version import get_qsmxt_version
 
 from interfaces import nipype_interface_selectfiles as sf
 from interfaces import nipype_interface_tgv_qsm as tgv
+from interfaces import nipype_interface_nextqsm as nextqsm
+from interfaces import nipype_interface_romeo as romeo
+from interfaces import nipype_interface_laplacian_unwrapping as laplacian
 from interfaces import nipype_interface_phaseweights as phaseweights
 from interfaces import nipype_interface_makehomogeneous as makehomogeneous
 from interfaces import nipype_interface_nonzeroaverage as nonzeroaverage
@@ -81,6 +84,66 @@ def init_session_workflow(subject, session):
         node for node in
         [init_run_workflow(subject, session, run) for run in runs]
         if node
+    ])
+    return wf
+
+def createUnwrappingNode(wf, n_getfiles, mn_params, mn_phase_scaled, type="laplacian"):
+    if type == "laplacian":
+        mn_laplacian = MapNode(
+            interface=laplacian.LaplacianInterface(),
+            iterfield=['phase'],
+            name='phase_unwrap_laplacian'
+            #output: 'out_file'
+        )
+        wf.connect([
+            (mn_phase_scaled, mn_laplacian, [('out_file', 'phase')])
+        ])
+        return (wf, mn_laplacian)
+    else:
+        mn_romeo = MapNode(
+            interface=romeo.RomeoInterface(),
+            iterfield=['phase', 'mag', 'TE'],
+            name='phase_unwrap_romeo'
+            #output: 'out_file'
+        )
+        wf.connect([
+            (mn_phase_scaled, mn_romeo, [('out_file', 'phase')]),
+            (n_getfiles, mn_romeo, [('magnitude_files', 'mag')]),
+            (mn_params, mn_romeo, [('EchoTime', 'TE')])
+        ])
+        return (wf, mn_romeo)
+
+def buildNextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, mn_mask, n_datasink):
+    # Unwrapping
+    (wf, mn_unwrapping) = createUnwrappingNode(wf, n_getfiles, mn_params, mn_phase_scaled, "romeo")
+    
+    # Normalize
+    mn_phase_normalize = MapNode(
+        interface=nextqsm.NormalizeInterface(
+            out_suffix='_normalized'
+        ),
+        iterfield=['phase_file', 'TE', 'b0'],
+        name='normalize_phase'
+        # output: 'out_file'
+    )
+    wf.connect([
+        (mn_params, mn_phase_normalize, [('EchoTime', 'TE')]),
+        (mn_params, mn_phase_normalize, [('MagneticFieldStrength', 'b0')]),
+        (mn_unwrapping, mn_phase_normalize, [('out_file', 'phase_file')])
+    ])
+    # NeXtQSM
+    mn_qsm = MapNode(
+        interface=nextqsm.NextqsmInterface(),
+        iterfield=['phase', 'mask'],
+        name='nextqsm'
+        # output: 'out_file'
+    )
+    wf.connect([
+        (mn_mask, mn_qsm, [('mask_file', 'mask')]),
+        (mn_phase_normalize, mn_qsm, [('out_file', 'phase')])
+    ])
+    wf.connect([
+        (mn_qsm, n_datasink, [('out_file', 'qsm_final')]),
     ])
     return wf
 
@@ -295,6 +358,9 @@ def init_run_workflow(subject, session, run):
         ])
     
     # QSM reconstruction
+    if args.qsm_algorithm == 'nextqsm':
+        return buildNextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, mn_mask, n_datasink)
+    
     if args.two_pass or masking == 'bet':
         mn_qsm = MapNode(
             interface=tgv.QSMappingInterface(
@@ -470,6 +536,12 @@ if __name__ == "__main__":
     parser.add_argument(
         'output_dir',
         help='Output QSM folder; will be created if it does not exist.'
+    )
+
+    parser.add_argument(
+        '--qsm_algorithm',
+        default='qsmxt',
+        help='Switch between different QSM algorithms'
     )
 
     parser.add_argument(
