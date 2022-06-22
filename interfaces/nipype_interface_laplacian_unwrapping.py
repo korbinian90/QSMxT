@@ -13,5 +13,5 @@ class LaplacianOutputSpec(TraitedSpec):
 class LaplacianInterface(CommandLine):
     input_spec = LaplacianInputSpec
     output_spec = LaplacianOutputSpec
-    _cmd = "which julia"
+    _cmd = "laplacian_unwrapping.jl"
     
