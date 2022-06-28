@@ -87,70 +87,44 @@ def init_session_workflow(subject, session):
     ])
     return wf
 
-def createUnwrappingNode(wf, n_getfiles, mn_params, mn_phase_scaled, type="laplacian"):
-    if type == "laplacian":
-        mn_laplacian = MapNode(
-            interface=laplacian.LaplacianInterface(),
-            iterfield=['phase'],
-            name='phase_unwrap_laplacian'
-            #output: 'out_file'
-        )
-        wf.connect([
-            (mn_phase_scaled, mn_laplacian, [('out_file', 'phase')])
-        ])
-        return (wf, mn_laplacian)
-    else:
-        mn_romeo = MapNode(
-            interface=romeo.RomeoInterface(),
-            iterfield=['phase', 'mag', 'TE'],
-            name='phase_unwrap_romeo'
-            #output: 'out_file'
-        )
-        wf.connect([
-            (mn_phase_scaled, mn_romeo, [('out_file', 'phase')]),
-            (n_getfiles, mn_romeo, [('magnitude_files', 'mag')]),
-            (mn_params, mn_romeo, [('EchoTime', 'TE')])
-        ])
-        return (wf, mn_romeo)
-
-def buildNextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, mn_mask, n_datasink):
-    # Unwrapping
-    (wf, mn_unwrapping) = createUnwrappingNode(wf, n_getfiles, mn_params, mn_phase_scaled, "romeo")
-    
-    # Normalize
-    mn_phase_normalize = MapNode(
-        interface=nextqsm.NormalizeInterface(
-            out_suffix='_normalized'
-        ),
-        iterfield=['phase_file', 'TE', 'b0'],
-        name='normalize_phase'
-        # output: 'out_file'
-    )
-    wf.connect([
-        (mn_params, mn_phase_normalize, [('EchoTime', 'TE')]),
-        (mn_params, mn_phase_normalize, [('MagneticFieldStrength', 'b0')]),
-        (mn_unwrapping, mn_phase_normalize, [('out_file', 'phase_file')])
-    ])
-    # NeXtQSM
-    mn_qsm = MapNode(
-        interface=nextqsm.NextqsmInterface(),
-        iterfield=['phase', 'mask'],
-        name='nextqsm'
-        # output: 'out_file'
-    )
-    wf.connect([
-        (mn_mask, mn_qsm, [('mask_file', 'mask')]),
-        (mn_phase_normalize, mn_qsm, [('out_file', 'phase')])
-    ])
-    wf.connect([
-        (mn_qsm, n_datasink, [('out_file', 'qsm_final')]),
-    ])
-    return wf
-
 def init_run_workflow(subject, session, run):
     wf = Workflow(run, base_dir=os.path.join(args.work_dir, "workflow_qsm", subject, session, run))
 
-    # get relevant files from this run
+    run_info = addGetFileNodes(subject, session, run)
+    if not run_info:
+        return # Skipping run
+    (n_getfiles, masking, add_bet, inhomogeneity_correction) = run_info
+
+    # datasink
+    n_datasink = Node(
+        interface=DataSink(base_directory=args.output_dir),
+        name='nipype_datasink'
+    )
+
+    mn_phase_scaled = addPhaseScaleNodes(wf, n_getfiles)
+
+    mn_params = addParamsNodes(wf, n_getfiles)
+    
+    if inhomogeneity_correction:
+        n_mag_files = addInhomogeneityCorrectionNodes(wf, n_getfiles)
+        mag_files_name = 'out_file'
+    else:
+        n_mag_files = n_getfiles
+        mag_files_name = 'magnitude_files'
+        
+    (mn_mask, mn_bet) = addMaskingNodes(wf, masking, add_bet, n_mag_files, mag_files_name, mn_phase_scaled)
+ 
+    # QSM reconstruction
+    if args.qsm_algorithm == 'nextqsm':
+        addNextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, mn_mask, n_datasink)
+    elif args.qsm_algorithm == 'none':
+        pass
+    else:
+        addQsmReconstructionNodes(wf, masking, add_bet, mn_bet, n_datasink, mn_params, mn_mask, mn_phase_scaled)
+    return wf
+
+def addGetFileNodes(subject, session, run):
+# get relevant files from this run
     phase_pattern = os.path.join(args.bids_dir, args.phase_pattern.format(subject=subject, session=session, run=run))
     phase_files = sorted(glob.glob(phase_pattern))[:args.num_echoes_to_process]
     
@@ -187,14 +161,10 @@ def init_run_workflow(subject, session, run):
     n_getfiles.inputs.phase_files = phase_files
     n_getfiles.inputs.magnitude_files = magnitude_files
     n_getfiles.inputs.params_files = params_files
+    
+    return (n_getfiles, masking, add_bet, inhomogeneity_correction)
 
-    # datasink
-    n_datasink = Node(
-        interface=DataSink(base_directory=args.output_dir),
-        name='nipype_datasink'
-    )
-
-    # scale phase data
+def addPhaseScaleNodes(wf, n_getfiles):
     mn_stats = MapNode(
         # -R : <min intensity> <max intensity>
         interface=ImageStats(op_string='-R'),
@@ -234,8 +204,10 @@ def init_run_workflow(subject, session, run):
         (n_getfiles, mn_phase_scaled, [('phase_files', 'in_file')]),
         (mn_stats, mn_phase_scaled, [(('out_stat', scale_to_pi), 'op_string')])
     ])
+    return mn_phase_scaled
 
-    # read echotime and field strengths from json files
+# read echotime and field strengths from json files
+def addParamsNodes(wf, n_getfiles):    
     def read_json(in_file):
         import os
         te = 0.001
@@ -259,108 +231,21 @@ def init_run_workflow(subject, session, run):
     wf.connect([
         (n_getfiles, mn_params, [('params_files', 'in_file')])
     ])
+    return mn_params
 
-    # homogeneity filter
-    if inhomogeneity_correction:
-        mn_inhomogeneity_correction = MapNode(
-            interface=makehomogeneous.MakeHomogeneousInterface(),
-            iterfield=['in_file'],
-            name='mriresearchtools_correct-inhomogeneity'
-            # output : out_file
-        )
-        wf.connect([
-            (n_getfiles, mn_inhomogeneity_correction, [('magnitude_files', 'in_file')])
-        ])
-
-    # brain extraction
-    def repeat(in_file):
-        return in_file
-    mn_mask = MapNode(
-        interface=Function(
-            input_names=['in_file'],
-            output_names=['mask_file'],
-            function=repeat
-        ),
+def addInhomogeneityCorrectionNodes(wf, n_getfiles):
+    mn_inhomogeneity_correction = MapNode(
+        interface=makehomogeneous.MakeHomogeneousInterface(),
         iterfield=['in_file'],
-        name='func_repeat-mask'
+        name='mriresearchtools_correct-inhomogeneity'
+        # output : out_file
     )
+    wf.connect([
+        (n_getfiles, mn_inhomogeneity_correction, [('magnitude_files', 'in_file')])
+    ])
+    return mn_inhomogeneity_correction
 
-    if masking == 'bet' or add_bet:
-        mn_bet = MapNode(
-            interface=BET(frac=args.bet_fractional_intensity, mask=True, robust=True),
-            iterfield=['in_file'],
-            name='fsl-bet'
-            # output: 'mask_file'
-        )
-        if inhomogeneity_correction:
-            wf.connect([
-                (mn_inhomogeneity_correction, mn_bet, [('out_file', 'in_file')])
-            ])
-        else:
-            wf.connect([
-                (n_getfiles, mn_bet, [('magnitude_files', 'in_file')])
-            ])
-
-        if not add_bet:
-            wf.connect([
-                (mn_bet, mn_mask, [('mask_file', 'in_file')])
-            ])
-    if masking == 'phase-based':
-        mn_phaseweights = MapNode(
-            interface=phaseweights.PhaseWeightsInterface(),
-            iterfield=['in_file'],
-            name='romeo_phase-weights'
-            # output: 'out_file'
-        )
-        wf.connect([
-            (mn_phase_scaled, mn_phaseweights, [('out_file', 'in_file')]),
-        ])
-
-        mn_phasemask = MapNode(
-            interface=ImageMaths(
-                suffix='_mask',
-                op_string=f'-thrp {args.threshold} -bin -ero -dilM'
-            ),
-            iterfield=['in_file'],
-            name='fslmaths_phase-mask'
-            # input  : 'in_file'
-            # output : 'out_file'
-        )
-        wf.connect([
-            (mn_phaseweights, mn_phasemask, [('out_file', 'in_file')])
-        ])
-        
-        wf.connect([
-            (mn_phasemask, mn_mask, [('out_file', 'in_file')])
-        ])
-    elif masking == 'magnitude-based':
-        mn_magmask = MapNode(
-            interface=ImageMaths(
-                suffix="_mask",
-                op_string=f"-thrp {args.threshold} -bin -ero -dilM"
-            ),
-            iterfield=['in_file'],
-            name='fslmaths_magnitude-mask'
-            # output: 'out_file'
-        )
-
-        if inhomogeneity_correction:
-            wf.connect([
-                (mn_inhomogeneity_correction, mn_magmask, [('out_file', 'in_file')])
-            ])
-        else:
-            wf.connect([
-                (n_getfiles, mn_magmask, [('magnitude_files', 'in_file')])
-            ])
-
-        wf.connect([
-            (mn_magmask, mn_mask, [('out_file', 'in_file')])
-        ])
-    
-    # QSM reconstruction
-    if args.qsm_algorithm == 'nextqsm':
-        return buildNextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, mn_mask, n_datasink)
-    
+def addQsmReconstructionNodes(wf, masking, add_bet, mn_bet, n_datasink, mn_params, mn_mask, mn_phase_scaled):
     if args.two_pass or masking == 'bet':
         mn_qsm = MapNode(
             interface=tgv.QSMappingInterface(
@@ -518,6 +403,144 @@ def init_run_workflow(subject, session, run):
             ])
 
     return wf
+
+def addMaskingNodes(wf, masking, add_bet, n_mag_files, mag_files_name, mn_phase_scaled):
+       # brain extraction
+    def repeat(in_file):
+        return in_file
+    mn_mask = MapNode(
+        interface=Function(
+            input_names=['in_file'],
+            output_names=['mask_file'],
+            function=repeat
+        ),
+        iterfield=['in_file'],
+        name='func_repeat-mask'
+    )
+    mn_bet = None
+    if masking == 'bet' or add_bet:
+        mn_bet = MapNode(
+            interface=BET(frac=args.bet_fractional_intensity, mask=True, robust=True),
+            iterfield=['in_file'],
+            name='fsl-bet'
+            # output: 'mask_file'
+        )
+        wf.connect([
+                (n_mag_files, mn_bet, [(mag_files_name, 'in_file')])
+            ])
+
+        if not add_bet:
+            wf.connect([
+                (mn_bet, mn_mask, [('mask_file', 'in_file')])
+            ])
+    if masking == 'phase-based':
+        mn_phaseweights = MapNode(
+            interface=phaseweights.PhaseWeightsInterface(),
+            iterfield=['in_file'],
+            name='romeo_phase-weights'
+            # output: 'out_file'
+        )
+        wf.connect([
+            (mn_phase_scaled, mn_phaseweights, [('out_file', 'in_file')]),
+        ])
+
+        mn_phasemask = MapNode(
+            interface=ImageMaths(
+                suffix='_mask',
+                op_string=f'-thrp {args.threshold} -bin -ero -dilM'
+            ),
+            iterfield=['in_file'],
+            name='fslmaths_phase-mask'
+            # input  : 'in_file'
+            # output : 'out_file'
+        )
+        wf.connect([
+            (mn_phaseweights, mn_phasemask, [('out_file', 'in_file')])
+        ])
+        
+        wf.connect([
+            (mn_phasemask, mn_mask, [('out_file', 'in_file')])
+        ])
+    elif masking == 'magnitude-based':
+        mn_magmask = MapNode(
+            interface=ImageMaths(
+                suffix="_mask",
+                op_string=f"-thrp {args.threshold} -bin -ero -dilM"
+            ),
+            iterfield=['in_file'],
+            name='fslmaths_magnitude-mask'
+            # output: 'out_file'
+        )
+
+        wf.connect([
+            (n_mag_files, mn_magmask, [(mag_files_name, 'in_file')])
+        ])
+
+        wf.connect([
+            (mn_magmask, mn_mask, [('out_file', 'in_file')])
+        ])
+    
+    return (mn_mask, mn_bet)
+
+def addUnwrappingNodes(wf, n_getfiles, mn_params, mn_phase_scaled, type="laplacian"):
+    if type == "laplacian":
+        mn_laplacian = MapNode(
+            interface=laplacian.LaplacianInterface(),
+            iterfield=['phase'],
+            name='phase_unwrap_laplacian'
+            #output: 'out_file'
+        )
+        wf.connect([
+            (mn_phase_scaled, mn_laplacian, [('out_file', 'phase')])
+        ])
+        return mn_laplacian
+    else:
+        mn_romeo = MapNode(
+            interface=romeo.RomeoInterface(),
+            iterfield=['phase', 'mag', 'TE'],
+            name='phase_unwrap_romeo'
+            #output: 'out_file'
+        )
+        wf.connect([
+            (mn_phase_scaled, mn_romeo, [('out_file', 'phase')]),
+            (n_getfiles, mn_romeo, [('magnitude_files', 'mag')]),
+            (mn_params, mn_romeo, [('EchoTime', 'TE')])
+        ])
+        return mn_romeo
+
+def addNextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, mn_mask, n_datasink):
+    # Unwrapping
+    mn_unwrapping = addUnwrappingNodes(wf, n_getfiles, mn_params, mn_phase_scaled, "romeo")
+    
+    # Normalize
+    mn_phase_normalize = MapNode(
+        interface=nextqsm.NormalizeInterface(
+            out_suffix='_normalized'
+        ),
+        iterfield=['phase_file', 'TE', 'b0'],
+        name='normalize_phase'
+        # output: 'out_file'
+    )
+    wf.connect([
+        (mn_params, mn_phase_normalize, [('EchoTime', 'TE')]),
+        (mn_params, mn_phase_normalize, [('MagneticFieldStrength', 'b0')]),
+        (mn_unwrapping, mn_phase_normalize, [('out_file', 'phase_file')])
+    ])
+    # NeXtQSM
+    mn_qsm = MapNode(
+        interface=nextqsm.NextqsmInterface(),
+        iterfield=['phase', 'mask'],
+        name='nextqsm'
+        # output: 'out_file'
+    )
+    wf.connect([
+        (mn_mask, mn_qsm, [('mask_file', 'mask')]),
+        (mn_phase_normalize, mn_qsm, [('out_file', 'phase')])
+    ])
+    wf.connect([
+        (mn_qsm, n_datasink, [('out_file', 'qsm_final')]),
+    ])
+    return
 
 
 if __name__ == "__main__":
