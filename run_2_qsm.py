@@ -118,7 +118,7 @@ def init_run_workflow(subject, session, run):
     if args.qsm_algorithm == 'nextqsm':
         addNextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, mn_mask, n_datasink)
     elif args.qsm_algorithm == 'nextqsm_combined':
-        addB0NextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, n_datasink)
+        addB0NextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, mn_mask, n_datasink)
     elif args.qsm_algorithm == 'none':
         pass
     else:
@@ -497,30 +497,30 @@ def addUnwrappingNodes(wf, n_getfiles, mn_params, mn_phase_scaled, type="laplaci
         ])
         return mn_laplacian
     else:
+        # TODO use me unwrapping with Node instead
         mn_romeo = MapNode(
             interface=romeo.RomeoInterface(),
-            iterfield=['phase', 'mag', 'TE'],
+            iterfield=['phase', 'mag'],
             name='phase_unwrap_romeo'
             #output: 'out_file'
         )
         wf.connect([
             (mn_phase_scaled, mn_romeo, [('out_file', 'phase')]),
-            (n_getfiles, mn_romeo, [('magnitude_files', 'mag')]),
-            (mn_params, mn_romeo, [('EchoTime', 'TE')])
+            (n_getfiles, mn_romeo, [('magnitude_files', 'mag')])
         ])
         return mn_romeo
     
-def addB0NextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, n_datasink):
-
-    def first(fieldStrength=None):
-        return fieldStrength[0]
-    n_fieldStrength = Node(Function(input_names="fieldStrength",
+def addB0NextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, mn_mask, n_datasink):
+    
+    def first(list=None):
+        return list[0]
+    n_fieldStrength = Node(Function(input_names="list",
                                     output_names=["fieldStrength"],
                                     function=first),
                             name='extract_fieldStrength')
     
     wf.connect([
-        (mn_params, n_fieldStrength, [('MagneticFieldStrength', 'fieldStrength')])
+        (mn_params, n_fieldStrength, [('MagneticFieldStrength', 'list')])
     ])
     
     n_romeo = Node(
@@ -548,30 +548,40 @@ def addB0NextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, n_datasink):
         (n_fieldStrength, n_B0_normalize, [('fieldStrength', 'fieldStrength')]),
         (n_romeo, n_B0_normalize, [('out_file', 'B0_file')])
     ])
-    
-    # Phase-based Maskung
-    n_phaseweights = Node(
-        interface=phaseweights.PhaseWeightsInterface(),
-        iterfield=['in_file'],
-        name='romeo_B0-weights'
-        # output: 'out_file'
-    )
-    wf.connect([
-        (n_romeo, n_phaseweights, [('out_file', 'in_file')]),
-    ])
-    n_phasemask = Node(
-        interface=ImageMaths(
-            suffix='_mask',
-            op_string=f'-thrp {args.threshold} -bin -ero -dilM'
-        ),
-        iterfield=['in_file'],
-        name='fslmaths_B0-mask'
-        # input  : 'in_file'
-        # output : 'out_file'
-    )
-    wf.connect([
-        (n_phaseweights, n_phasemask, [('out_file', 'in_file')])
-    ])
+    B0_mask = False
+    if B0_mask:
+        # Phase-based Maskung
+        n_phaseweights = Node(
+            interface=phaseweights.PhaseWeightsInterface(),
+            iterfield=['in_file'],
+            name='romeo_B0-weights'
+            # output: 'out_file'
+        )
+        wf.connect([
+            (n_romeo, n_phaseweights, [('out_file', 'in_file')]),
+        ])
+        n_mask = Node(
+            interface=ImageMaths(
+                suffix='_mask',
+                op_string=f'-thrp {args.threshold} -bin -ero -dilM'
+            ),
+            iterfield=['in_file'],
+            name='fslmaths_B0-mask'
+            # input  : 'in_file'
+            # output : 'out_file'
+        )
+        wf.connect([
+            (n_phaseweights, n_mask, [('out_file', 'in_file')])
+        ])
+    else:
+        n_mask = Node(Function(input_names="list",
+                                        output_names=["out_file"],
+                                        function=first),
+                                name='extract_Mask')
+        
+        wf.connect([
+            (mn_mask, n_mask, [('mask_file', 'list')])
+        ])
     
     # NeXtQSM
     n_qsm = Node(
@@ -581,7 +591,7 @@ def addB0NextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, n_datasink):
         # output: 'out_file'
     )
     wf.connect([
-        (n_phasemask, n_qsm, [('out_file', 'mask')]),
+        (n_mask, n_qsm, [('out_file', 'mask')]),
         (n_B0_normalize, n_qsm, [('out_file', 'phase')])
     ])
     wf.connect([

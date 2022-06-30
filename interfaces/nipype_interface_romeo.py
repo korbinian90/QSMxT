@@ -5,13 +5,11 @@ import numpy as np
 
 ## Romeo wrapper single-echo (MapNode)
 class RomeoInputSpec(BaseInterfaceInputSpec):
-    #phase = File(position=0, mandatory=True, exists=True, argstr="--no-rescale --phase-offset-correction --phase %s")
-    phase = File(position=0, mandatory=True, exists=True, argstr="--phase %s")
+    phase = File(mandatory=True, exists=True, argstr="--phase %s")
     #mask = File(mandatory=False, exists=True, argstr="--mask %s")
-    TE = traits.Float(position=1, desc='Echo Time [sec]', mandatory=True, argstr="-t %f")
-    mag = File(position=2, mandatory=False, exists=True, argstr="--mag %s")
-    out_file = File(position=3, argstr="--output %s", name_source=['phase'], name_template='%s_unwrapped.nii.gz')
-    # TODO use out_suffix?
+    #TE = traits.Float(desc='Echo Time [sec]', mandatory=True, argstr="-t %f")
+    mag = File(mandatory=False, exists=True, argstr="--mag %s")
+    out_file = File(argstr="--output %s", name_source=['phase'], name_template='%s_unwrapped.nii.gz')
 
 class RomeoOutputSpec(TraitedSpec):
     out_file = File()
@@ -19,7 +17,7 @@ class RomeoOutputSpec(TraitedSpec):
 class RomeoInterface(CommandLine):
     input_spec = RomeoInputSpec
     output_spec = RomeoOutputSpec
-    _cmd = "romeo.jl"
+    _cmd = "romeoApp.jl"
 
 
 ## Romeo wrapper multi-echo (Node)
