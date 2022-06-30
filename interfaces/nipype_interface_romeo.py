@@ -7,9 +7,8 @@ import numpy as np
 class RomeoInputSpec(BaseInterfaceInputSpec):
     phase = File(mandatory=True, exists=True, argstr="--phase %s")
     #mask = File(mandatory=False, exists=True, argstr="--mask %s")
-    #TE = traits.Float(desc='Echo Time [sec]', mandatory=True, argstr="-t %f")
     mag = File(mandatory=False, exists=True, argstr="--mag %s")
-    out_file = File(argstr="--output %s", name_source=['phase'], name_template='%s_unwrapped.nii.gz')
+    out_file = File(name_source=['phase'], name_template='%s_unwrapped.nii.gz', argstr="--output %s")
 
 class RomeoOutputSpec(TraitedSpec):
     out_file = File()
@@ -17,7 +16,7 @@ class RomeoOutputSpec(TraitedSpec):
 class RomeoInterface(CommandLine):
     input_spec = RomeoInputSpec
     output_spec = RomeoOutputSpec
-    _cmd = "romeoApp.jl"
+    _cmd = "romeoApp.jl --no-rescale"
 
 
 ## Romeo wrapper multi-echo (Node)

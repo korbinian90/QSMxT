@@ -101,9 +101,10 @@ def init_run_workflow(subject, session, run):
         name='nipype_datasink'
     )
 
+    mn_params = addParamsNodes(wf, n_getfiles)
+    
     mn_phase_scaled = addPhaseScaleNodes(wf, n_getfiles)
 
-    mn_params = addParamsNodes(wf, n_getfiles)
     
     if inhomogeneity_correction:
         n_mag_files = addInhomogeneityCorrectionNodes(wf, n_getfiles)
@@ -484,7 +485,7 @@ def addMaskingNodes(wf, masking, add_bet, n_mag_files, mag_files_name, mn_phase_
     
     return (mn_mask, mn_bet)
 
-def addUnwrappingNodes(wf, n_getfiles, mn_params, mn_phase_scaled, type="laplacian"):
+def addUnwrappingNodes(wf, n_getfiles, mn_params, mn_phase_scaled, type):
     if type == "laplacian":
         mn_laplacian = MapNode(
             interface=laplacian.LaplacianInterface(),
@@ -496,7 +497,7 @@ def addUnwrappingNodes(wf, n_getfiles, mn_params, mn_phase_scaled, type="laplaci
             (mn_phase_scaled, mn_laplacian, [('out_file', 'phase')])
         ])
         return mn_laplacian
-    else:
+    elif type == "romeo":
         # TODO use me unwrapping with Node instead
         mn_romeo = MapNode(
             interface=romeo.RomeoInterface(),
@@ -601,10 +602,9 @@ def addB0NextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, mn_mask, n_dat
     
 
 def addNextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, mn_mask, n_datasink):
-    # Unwrapping
-    mn_unwrapping = addUnwrappingNodes(wf, n_getfiles, mn_params, mn_phase_scaled, "romeo")
+    mn_unwrapping = addUnwrappingNodes(wf, n_getfiles, mn_params, mn_phase_scaled, args.unwrapping_algorithm)
     
-    # Normalize
+    # Normalize for NeXtQSM
     mn_phase_normalize = MapNode(
         interface=nextqsm.NormalizeInterface(
             out_suffix='_normalized'
@@ -618,6 +618,7 @@ def addNextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, mn_mask, n_datas
         (mn_params, mn_phase_normalize, [('MagneticFieldStrength', 'b0')]),
         (mn_unwrapping, mn_phase_normalize, [('out_file', 'phase_file')])
     ])
+        
     # NeXtQSM
     mn_qsm = MapNode(
         interface=nextqsm.NextqsmInterface(),
@@ -657,6 +658,12 @@ if __name__ == "__main__":
         '--qsm_algorithm',
         default='qsmxt',
         help='Switch between different QSM algorithms'
+    )
+
+    parser.add_argument(
+        '--unwrapping_algorithm',
+        default='romeo',
+        help='romeo | romeoB0 | laplacian. Only used for nextqsm'
     )
 
     parser.add_argument(
