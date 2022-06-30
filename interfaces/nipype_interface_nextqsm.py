@@ -63,3 +63,38 @@ class NormalizeInterface(SimpleInterface):
         filename = fname_presuffix(fname=fname + self.inputs.out_suffix, suffix=".nii.gz", newpath=os.getcwd())
         self._results['out_file'] = normalize(self.inputs.phase_file, self.inputs.b0, self.inputs.TE, filename)
         return runtime
+
+
+# fieldstrength in [T]
+def normalizeB0(B0_file, fieldStrength, filename=None):
+    centre_freq = 127736254 / 3 * fieldStrength # in [Hz]
+    B0_nii = nib.load(B0_file)
+    B0 = B0_nii.get_fdata() # in [Hz]
+    normalized = B0 / centre_freq * 1e3
+    
+    if filename is not None:
+        save_nii(normalized, filename, B0_nii)
+        return filename
+    
+    return normalized
+
+class NormalizeB0InputSpec(BaseInterfaceInputSpec):
+    B0_file = File(mandatory=True, exists=True)
+    fieldStrength = traits.Float(desc='Field Strength [Tesla]', mandatory=True, argstr="-f %f")
+    out_suffix = traits.String("_normalized_B0", desc='Suffix for output files. Will be followed by 000 (reason - see CLI)',
+                               usedefault=True, argstr="-o %s")
+
+
+class NormalizeB0OutputSpec(TraitedSpec):
+    out_file = File(desc='B0 normalized for NeXtQSM')
+
+
+class NormalizeB0Interface(SimpleInterface):
+    input_spec = NormalizeB0InputSpec
+    output_spec = NormalizeB0OutputSpec
+    
+    def _run_interface(self, runtime):
+        _, fname, _ = split_filename(self.inputs.B0_file)
+        filename = fname_presuffix(fname=fname + self.inputs.out_suffix, suffix=".nii.gz", newpath=os.getcwd())
+        self._results['out_file'] = normalizeB0(self.inputs.B0_file, self.inputs.fieldStrength, filename)
+        return runtime
