@@ -541,7 +541,7 @@ def addB0NextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, mn_mask, n_dat
             out_suffix='_B0_normalized'
         ),
         iterfield=['B0_file', 'fieldStrength'],
-        name='normalize_B0'
+        name='nextqsm_normalize_B0'
         # output: 'out_file'
     )
     
@@ -896,12 +896,13 @@ if __name__ == "__main__":
             f.write("\n\n - Dymerska B, Eckstein K, Bachrata B, et al. Phase unwrapping with a rapid opensource minimum spanning tree algorithm (ROMEO). Magnetic Resonance in Medicine. 2021;85(4):2294-2308. doi:10.1002/mrm.28563")
         if any_string_matches_any_node(['tgv']):
             f.write("\n\n - Langkammer C, Bredies K, Poser BA, et al. Fast quantitative susceptibility mapping using 3D EPI and total generalized variation. NeuroImage. 2015;111:622-630. doi:10.1016/j.neuroimage.2015.02.041")
-        if any_string_matches_any_node(['correct-inhomogeneity']):
-            f.write("\n\n - Eckstein K, Trattnig S, Simon DR. A Simple homogeneity correction for neuroimaging at 7T. In: Proc. Intl. Soc. Mag. Reson. Med. International Society for Magnetic Resonance in Medicine; 2019. Abstract 2716. https://index.mirasmart.com/ISMRM2019/PDFfiles/2716.html")
-        if any_string_matches_any_node(['correct-inhomogeneity', 'romeo']):
+        if any_string_matches_any_node(['correct-inhomogeneity', 'romeo_B0']):
+            f.write("\n\n - Eckstein K, Bchrata B, Hangel Gilbert, et al. Improved susceptibility weighted imaging at ultra-high field using bipolar multi-echo acquisition and optimized image processing: CLEAR-SWI. NeuroImage. 2021;237:118175. doi:10.1016/j.neuroimage.2021.118175")
+        if any_string_matches_any_node(['correct-inhomogeneity', 'romeo', 'laplacian']):
             f.write("\n\n - Eckstein K. korbinian90/MriResearchTools.jl. GitHub; 2022. https://github.com/korbinian90/MriResearchTools.jl")
         if any_string_matches_any_node(['nibabel']):
             f.write("\n\n - Brett M, Markiewicz CJ, Hanke M, et al. nipy/nibabel. GitHub; 2019. https://github.com/nipy/nibabel")
+        ## add NeXtQSM
         f.write("\n\n")
 
     if args.qsub_account_string:
