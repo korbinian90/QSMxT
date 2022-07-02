@@ -12,7 +12,6 @@ from nipype.interfaces.io import DataSink
 from nipype.pipeline.engine import Workflow, Node, MapNode
 from scripts.get_qsmxt_version import get_qsmxt_version
 
-from interfaces import nipype_interface_selectfiles as sf
 from interfaces import nipype_interface_tgv_qsm as tgv
 from interfaces import nipype_interface_nextqsm as nextqsm
 from interfaces import nipype_interface_romeo as romeo
@@ -21,6 +20,7 @@ from interfaces import nipype_interface_phaseweights as phaseweights
 from interfaces import nipype_interface_makehomogeneous as makehomogeneous
 from interfaces import nipype_interface_nonzeroaverage as nonzeroaverage
 from interfaces import nipype_interface_twopass as twopass
+from workflows.unwrapping import unwrapping_workflow
 
 import argparse
 
@@ -484,35 +484,8 @@ def addMaskingNodes(wf, masking, add_bet, n_mag_files, mag_files_name, mn_phase_
         ])
     
     return (mn_mask, mn_bet)
-
-def addUnwrappingNodes(wf, n_getfiles, mn_params, mn_phase_scaled, type):
-    if type == "laplacian":
-        mn_laplacian = MapNode(
-            interface=laplacian.LaplacianInterface(),
-            iterfield=['phase'],
-            name='phase_unwrap_laplacian'
-            #output: 'out_file'
-        )
-        wf.connect([
-            (mn_phase_scaled, mn_laplacian, [('out_file', 'phase')])
-        ])
-        return mn_laplacian
-    elif type == "romeo":
-        # TODO use me unwrapping with Node instead
-        mn_romeo = MapNode(
-            interface=romeo.RomeoInterface(),
-            iterfield=['phase', 'mag'],
-            name='phase_unwrap_romeo'
-            #output: 'out_file'
-        )
-        wf.connect([
-            (mn_phase_scaled, mn_romeo, [('out_file', 'phase')]),
-            (n_getfiles, mn_romeo, [('magnitude_files', 'mag')])
-        ])
-        return mn_romeo
     
 def addB0NextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, mn_mask, n_datasink):
-    
     def first(list=None):
         return list[0]
     n_fieldStrength = Node(Function(input_names="list",
@@ -602,9 +575,8 @@ def addB0NextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, mn_mask, n_dat
     
 
 def addNextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, mn_mask, n_datasink):
-    mn_unwrapping = addUnwrappingNodes(wf, n_getfiles, mn_params, mn_phase_scaled, args.unwrapping_algorithm)
+    unwrapping = unwrapping_workflow()
     
-    # Normalize for NeXtQSM
     mn_phase_normalize = MapNode(
         interface=nextqsm.NormalizeInterface(
             out_suffix='_normalized'
@@ -613,27 +585,29 @@ def addNextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, mn_mask, n_datas
         name='normalize_phase'
         # output: 'out_file'
     )
-    wf.connect([
-        (mn_params, mn_phase_normalize, [('EchoTime', 'TE')]),
-        (mn_params, mn_phase_normalize, [('MagneticFieldStrength', 'b0')]),
-        (mn_unwrapping, mn_phase_normalize, [('out_file', 'phase_file')])
-    ])
         
-    # NeXtQSM
     mn_qsm = MapNode(
         interface=nextqsm.NextqsmInterface(),
         iterfield=['phase', 'mask'],
         name='nextqsm'
         # output: 'out_file'
     )
+    
+    print(unwrapping.inputs)
+    
     wf.connect([
+        (mn_phase_scaled, unwrapping, [('out_file', 'inputnode.wrapped_phase')]),
+        (n_getfiles, unwrapping, [('magnitude_files', 'inputnode.mag')]),
+        
+        (unwrapping, mn_phase_normalize, [('outputnode.unwrapped_phase', 'phase_file')]),
+        (mn_params, mn_phase_normalize, [('EchoTime', 'TE')]),
+        (mn_params, mn_phase_normalize, [('MagneticFieldStrength', 'b0')]),
+        
         (mn_mask, mn_qsm, [('mask_file', 'mask')]),
-        (mn_phase_normalize, mn_qsm, [('out_file', 'phase')])
+        (mn_phase_normalize, mn_qsm, [('out_file', 'phase')]),
+        
+        (mn_qsm, n_datasink, [('out_file', 'qsm_final')])
     ])
-    wf.connect([
-        (mn_qsm, n_datasink, [('out_file', 'qsm_final')]),
-    ])
-    return
 
 
 if __name__ == "__main__":
