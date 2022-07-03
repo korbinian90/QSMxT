@@ -876,7 +876,8 @@ if __name__ == "__main__":
             f.write("\n\n - Eckstein K. korbinian90/MriResearchTools.jl. GitHub; 2022. https://github.com/korbinian90/MriResearchTools.jl")
         if any_string_matches_any_node(['nibabel']):
             f.write("\n\n - Brett M, Markiewicz CJ, Hanke M, et al. nipy/nibabel. GitHub; 2019. https://github.com/nipy/nibabel")
-        ## add NeXtQSM
+        if any_string_matches_any_node(['nextqsm']):
+            f.write("\n\n - Cognolato F, O'Brien K, Jin J, et al. NeXtQSM -- A complete deep learning pipeline for data-consistent quantitative susceptibility mapping trained with hybrid data. arxiv; 2021. doi:10.48550/arXiv.2107.07752")
         f.write("\n\n")
 
     if args.qsub_account_string:
