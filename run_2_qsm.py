@@ -117,7 +117,7 @@ def init_run_workflow(subject, session, run):
  
     # QSM reconstruction
     if args.qsm_algorithm == 'nextqsm':
-        addNextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, mn_mask, n_datasink)
+        addNextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, mn_mask, n_datasink, args.unwrapping_algorithm)
     elif args.qsm_algorithm == 'nextqsm_combined':
         addB0NextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, mn_mask, n_datasink)
     elif args.qsm_algorithm == 'none':
@@ -520,7 +520,7 @@ def addB0NextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, mn_mask, n_dat
     
     wf.connect([
         (n_fieldStrength, n_B0_normalize, [('fieldStrength', 'fieldStrength')]),
-        (n_romeo, n_B0_normalize, [('out_file', 'B0_file')])
+        (n_romeo, n_B0_normalize, [('B0', 'B0_file')])
     ])
     B0_mask = False
     if B0_mask:
@@ -574,8 +574,8 @@ def addB0NextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, mn_mask, n_dat
     return
     
 
-def addNextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, mn_mask, n_datasink):
-    unwrapping = unwrapping_workflow()
+def addNextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, mn_mask, n_datasink, unwrapping):
+    unwrapping = unwrapping_workflow(unwrapping=unwrapping)
     
     mn_phase_normalize = MapNode(
         interface=nextqsm.NormalizeInterface(
@@ -598,6 +598,7 @@ def addNextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, mn_mask, n_datas
     wf.connect([
         (mn_phase_scaled, unwrapping, [('out_file', 'inputnode.wrapped_phase')]),
         (n_getfiles, unwrapping, [('magnitude_files', 'inputnode.mag')]),
+        (mn_params, unwrapping, [('EchoTime', 'inputnode.TE')]),
         
         (unwrapping, mn_phase_normalize, [('outputnode.unwrapped_phase', 'phase_file')]),
         (mn_params, mn_phase_normalize, [('EchoTime', 'TE')]),
