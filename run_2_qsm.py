@@ -21,6 +21,7 @@ from interfaces import nipype_interface_makehomogeneous as makehomogeneous
 from interfaces import nipype_interface_nonzeroaverage as nonzeroaverage
 from interfaces import nipype_interface_twopass as twopass
 from workflows.unwrapping import unwrapping_workflow
+from workflows.nextqsm import nextqsm_workflow
 
 import argparse
 
@@ -117,7 +118,7 @@ def init_run_workflow(subject, session, run):
  
     # QSM reconstruction
     if args.qsm_algorithm == 'nextqsm':
-        addNextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, mn_mask, n_datasink, args.unwrapping_algorithm)
+        addNextqsmWorkflow(wf, n_getfiles, mn_params, mn_phase_scaled, mn_mask, n_datasink, args.unwrapping_algorithm)
     elif args.qsm_algorithm == 'nextqsm_combined':
         addB0NextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, mn_mask, n_datasink)
     elif args.qsm_algorithm == 'none':
@@ -574,40 +575,21 @@ def addB0NextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, mn_mask, n_dat
     return
     
 
-def addNextqsmNodes(wf, n_getfiles, mn_params, mn_phase_scaled, mn_mask, n_datasink, unwrapping):
-    unwrapping = unwrapping_workflow(unwrapping=unwrapping)
-    
-    mn_phase_normalize = MapNode(
-        interface=nextqsm.NormalizeInterface(
-            out_suffix='_normalized'
-        ),
-        iterfield=['phase_file', 'TE', 'b0'],
-        name='normalize_phase'
-        # output: 'out_file'
-    )
-        
-    mn_qsm = MapNode(
-        interface=nextqsm.NextqsmInterface(),
-        iterfield=['phase', 'mask'],
-        name='nextqsm'
-        # output: 'out_file'
-    )
-    
-    print(unwrapping.inputs)
+def addNextqsmWorkflow(wf, n_getfiles, mn_params, mn_phase_scaled, mn_mask, n_datasink, unwrapping_type):
+    wf_unwrapping = unwrapping_workflow(unwrapping_type)
+    wf_nextqsm = nextqsm_workflow()
     
     wf.connect([
-        (mn_phase_scaled, unwrapping, [('out_file', 'inputnode.wrapped_phase')]),
-        (n_getfiles, unwrapping, [('magnitude_files', 'inputnode.mag')]),
-        (mn_params, unwrapping, [('EchoTime', 'inputnode.TE')]),
+        (mn_phase_scaled, wf_unwrapping, [('out_file', 'inputnode.wrapped_phase')]),
+        (n_getfiles, wf_unwrapping, [('magnitude_files', 'inputnode.mag')]),
+        (mn_params, wf_unwrapping, [('EchoTime', 'inputnode.TE')]),
         
-        (unwrapping, mn_phase_normalize, [('outputnode.unwrapped_phase', 'phase_file')]),
-        (mn_params, mn_phase_normalize, [('EchoTime', 'TE')]),
-        (mn_params, mn_phase_normalize, [('MagneticFieldStrength', 'b0')]),
+        (wf_unwrapping, wf_nextqsm, [('outputnode.unwrapped_phase', 'inputnode.unwrapped_phase')]),
+        (mn_mask, wf_nextqsm, [('mask_file', 'inputnode.mask')]),
+        (mn_params, wf_nextqsm, [('EchoTime', 'inputnode.TE'),
+                                ('MagneticFieldStrength', 'inputnode.fieldStrength')]),
         
-        (mn_mask, mn_qsm, [('mask_file', 'mask')]),
-        (mn_phase_normalize, mn_qsm, [('out_file', 'phase')]),
-        
-        (mn_qsm, n_datasink, [('out_file', 'qsm_final')])
+        (wf_nextqsm, n_datasink, [('outputnode.qsm', 'qsm_final')])
     ])
 
 

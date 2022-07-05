@@ -28,10 +28,10 @@ class NextqsmInterface(CommandLine):
 def save_nii(data, file_path, nii_like):
     nib.save(nib.nifti1.Nifti1Image(data, affine=nii_like.affine, header=nii_like.header), file_path)
 
-# b0 in [T], TE in [s]
-def normalize(phase_file, b0, TE, filename=None):
-    centre_freq = 127736254 / 3 * b0 # in [Hz]
-    phase_nii = nib.load(phase_file)
+# fieldStrength in [T], TE in [s]
+def normalize(phase, fieldStrength, TE, filename=None):
+    centre_freq = 127736254 / 3 * fieldStrength # in [Hz]
+    phase_nii = nib.load(phase)
     phase = phase_nii.get_fdata()
     normalized = phase / (2 * np.pi * TE * centre_freq) * 1e6
     
@@ -43,9 +43,9 @@ def normalize(phase_file, b0, TE, filename=None):
     
 
 class NormalizeInputSpec(BaseInterfaceInputSpec):
-    phase_file = File(mandatory=True, exists=True)
+    phase = File(mandatory=True, exists=True)
     TE = traits.Float(desc='Echo Time [sec]', mandatory=True, argstr="-t %f")
-    b0 = traits.Float(desc='Field Strength [Tesla]', mandatory=True, argstr="-f %f")
+    fieldStrength = traits.Float(desc='Field Strength [Tesla]', mandatory=True, argstr="-f %f")
     out_suffix = traits.String("_normalized_phase", desc='Suffix for output files. Will be followed by 000 (reason - see CLI)',
                                usedefault=True, argstr="-o %s")
 
@@ -59,9 +59,9 @@ class NormalizeInterface(SimpleInterface):
     output_spec = NormalizeOutputSpec
     
     def _run_interface(self, runtime):
-        _, fname, _ = split_filename(self.inputs.phase_file)
+        _, fname, _ = split_filename(self.inputs.phase)
         filename = fname_presuffix(fname=fname + self.inputs.out_suffix, suffix=".nii.gz", newpath=os.getcwd())
-        self._results['out_file'] = normalize(self.inputs.phase_file, self.inputs.b0, self.inputs.TE, filename)
+        self._results['out_file'] = normalize(self.inputs.phase, self.inputs.fieldStrength, self.inputs.TE, filename)
         return runtime
 
 
