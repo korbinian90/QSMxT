@@ -84,7 +84,7 @@ def threshold_masking(in_files, threshold=None, fill_strength=0):
 
 # The smoothing removes background noise and closes small holes
 # A smaller threshold grows the mask
-def fill_holes_smoothing(mask, sigma=[5,5,5], threshold=0.4):
+def fill_holes_smoothing(mask, sigma=[5,5,5], threshold=0.5):
     smoothed = gaussian_filter(mask * 1.0, sigma, truncate=2.0) # truncate reduces the kernel size: less precise but faster
     return np.array(smoothed > threshold, dtype=int)
 
