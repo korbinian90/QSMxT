@@ -54,7 +54,8 @@ def threshold_masking(in_files, threshold=None, fill_strength=0):
     # remove noisy background voxels (applied to masks only)
     # shape = np.ones([3,3,3])
     # small_masks = [binary_dilation(binary_erosion(np.array(data > 0.5, dtype=int)), shape) for data in all_float_data]
-    small_masks = [np.array(data > 0.5, dtype=int) for data in all_float_data]
+    # small_masks = [np.array(data > _gaussian_threshold(data.flatten()), dtype=int) for data in all_float_data]
+    small_masks = [np.array(data > threshold, dtype=int) for data in all_float_data]
 
     # hole-filling (applied to filled_masks only)
     filled_masks = [fill_holes_smoothing(np.array(data > 0.3, dtype=int)) for data in all_float_data]
