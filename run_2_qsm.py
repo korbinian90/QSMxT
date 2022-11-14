@@ -397,9 +397,16 @@ def parse_args(args):
         num = float(num)
         if num < 0 or num > 1: raise ValueError(f"Argument must be between 0 and 1 - got {num}.")
         return num
+    # KE: temporary hack to get two mask values
+    def masking_argument(input):
+        from ast import literal_eval as make_tuple
+        tpl = make_tuple(input)
+        if isinstance(tpl, tuple) & len(tpl) == 2:
+            return tpl
+        return between_0_and_1(input)
     parser.add_argument(
         '--masking_threshold',
-        type=between_0_and_1,
+        type=masking_argument,
         default=None,
         help='Masking threshold (between 0 and 1). For magnitude-based masking, this represents the '+
              'percentage of the histogram to exclude from masks. For phase-based masking, this represents the '+

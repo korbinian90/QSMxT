@@ -34,7 +34,7 @@ def _clean_histogram(image_histogram):
     return image_histogram
 
 # === THRESHOLD-BASED MASKING FOR TWO-PASS AND SINGLE-PASS QSM ===
-def threshold_masking(in_files, threshold=None, fill_strength=0):
+def threshold_masking(in_files, threshold=None, fill_strength=None):
     # sort input filepaths
     in_files = sorted(in_files)
 
@@ -45,21 +45,24 @@ def threshold_masking(in_files, threshold=None, fill_strength=0):
     
     # calculate gaussian threshold if none given
     if not threshold: threshold = _gaussian_threshold(image_histogram)
-
-    # do masking
-    masks = [np.array(data > threshold, dtype=int) for data in all_float_data]
+    
+    if isinstance(threshold, tuple):
+        threshold_small, threshold_filled = threshold
+    else:
+        threshold_small = threshold
+        threshold_filled = threshold
 
     # remove noisy background voxels (applied to masks only)
-    small_masks = [binary_opening(mask) for mask in masks]
+    small_masks = [binary_opening(np.array(data > threshold_small, dtype=int)) for data in all_float_data]
 
     # hole-filling (applied to filled_masks only)
-    filled_masks = [fill_holes_smoothing(mask) for mask in masks]
+    filled_masks = [fill_holes_smoothing(np.array(data > threshold_filled, dtype=int)) for data in all_float_data]
 
     # determine filenames
     small_mask_filenames = [f"{os.path.abspath(os.path.split(in_file)[1].split('.')[0])}_mask.nii" for in_file in in_files]
     filled_mask_filenames = [f"{os.path.abspath(os.path.split(in_file)[1].split('.')[0])}_mask_filled.nii" for in_file in in_files]
 
-    for i in range(len(masks)):
+    for i in range(len(small_masks)):
         all_niis[i].header.set_data_dtype(np.uint8)
         nib.save(
             nib.Nifti1Image(
@@ -100,7 +103,7 @@ def fill_holes_morphological(mask, fill_strength=0):
 
 class MaskingInputSpec(BaseInterfaceInputSpec):
     in_files = InputMultiPath(mandatory=True, exists=True)
-    threshold = traits.Float(mandatory=False, default_value=None)
+    threshold = traits.Union(traits.Tuple(), traits.Float())
     fill_strength = traits.Int(mandatory=False, default_value=1)
 
 
@@ -118,7 +121,10 @@ class MaskingInterface(SimpleInterface):
         masks, masks_filled, threshold = threshold_masking(self.inputs.in_files, self.inputs.threshold, self.inputs.fill_strength)
         self._results['masks'] = masks
         self._results['masks_filled'] = masks_filled
-        self._results['threshold'] = threshold
+        if isinstance(threshold, tuple):
+            self._results['threshold'] = threshold[0]
+        else:
+            self._results['threshold'] = threshold
         return runtime
 
 
